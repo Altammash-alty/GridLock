@@ -1,69 +1,59 @@
-import pandas as pd
-import numpy as np
-import optuna
-import warnings
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-import seaborn as sns
-from sklearn.model_selection import KFold
-from sklearn.metrics import r2_score
-from xgboost import XGBRegressor
-import lightgbm as lgb
-from catboost import CatBoostRegressor
-import pygeohash as pgh
+train = pd.read_csv("dataset/train.csv")
+test  = pd.read_csv("dataset/test.csv")
+print(f"  Raw train : {train.shape} | Raw test : {test.shape}")
 
-warnings.filterwarnings('ignore')
-optuna.logging.set_verbosity(optuna.logging.WARNING)
+# Run EDA before any processing
+run_eda(train)
 
-# ── Plot style ─────────────────────────────────────────────────────────
-sns.set_theme(style="darkgrid", palette="muted")
-plt.rcParams.update({
-    'figure.facecolor': '#0f1117',
-    'axes.facecolor':   '#1a1d27',
-    'axes.labelcolor':  '#e0e0e0',
-    'xtick.color':      '#a0a0a0',
-    'ytick.color':      '#a0a0a0',
-    'text.color':       '#e0e0e0',
-    'grid.color':       '#2a2d3a',
-    'axes.titlecolor':  '#ffffff',
-    'figure.titlesize': 16,
-})
-PALETTE = ['#00d4ff', '#ff6b6b', '#51cf66', '#ffd43b', '#cc5de8', '#ff8cc8']
-MISSING_TOKEN = "__MISSING__"
+# Run pipeline
+train, test = full_pipeline(train, test)
 
+FEATURES = [
+    # Spatial
+    'lat', 'lng',
+    'geohash_enc', 'geo3_enc', 'geo4_enc', 'geo5_enc',
 
-# ══════════════════════════════════════════════════════════════════════
-# SECTION 1 — EDA VISUALIZATIONS
-# ══════════════════════════════════════════════════════════════════════
-def run_eda(train: pd.DataFrame) -> None:
-    print("\n" + "="*60)
-    print("  SECTION 1 — EDA & FEATURE VISUALIZATIONS")
-    print("="*60)
+    # Time
+    'day', 'time_slot', 'hour', 'minute',
+    'minutes_since_midnight',
+    'hour_sin', 'hour_cos',
+    'minute_sin', 'minute_cos',
+    'day_sin', 'day_cos',
+    'day_of_week', 'is_weekend',
+    'is_peak', 'is_night', 'is_morning', 'is_afternoon', 'is_evening',
 
-    df = train.copy()
-    df['hour']      = df['timestamp'].apply(lambda t: int(t.split(':')[0]))
-    df['minute']    = df['timestamp'].apply(lambda t: int(t.split(':')[1]))
-    df['time_slot'] = df['hour'] * 4 + df['minute'] // 15
+    # Road
+    'road_enc', 'NumberofLanes', 'lv_bin', 'lm_bin',
+    'road_lanes', 'capacity_proxy',
 
-    # ── Plot 1: Demand Distribution ────────────────────────────────
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle('Traffic Demand Distribution', fontsize=16, fontweight='bold')
+    # Weather
+    'weather_enc', 'Temperature',
+    'temp_weather_interaction', 'lanes_weather',
 
-    axes[0].hist(df['demand'], bins=60, color=PALETTE[0],
-                 edgecolor='none', alpha=0.85)
-    axes[0].set_title('Demand Histogram')
-    axes[0].set_xlabel('Demand')
-    axes[0].set_ylabel('Count')
-    axes[0].axvline(df['demand'].mean(), color=PALETTE[1],
-                    linestyle='--', linewidth=1.5, label=f"Mean={df['demand'].mean():.3f}")
-    axes[0].axvline(df['demand'].median(), color=PALETTE[2],
-                    linestyle='--', linewidth=1.5, label=f"Median={df['demand'].median():.3f}")
-    axes[0].legend()
+    # OOF interactions
+    'geo_slot_enc', 'geo_peak_enc', 'geo_road_enc',
+    'road_weather_interaction_enc',
+    'geohash_hour_interaction_enc',
+    'geohash_weather_enc',
 
-    sns.boxplot(x='Weather', y='demand', data=df,
-                palette=PALETTE, ax=axes[1])
-    axes[1].set_title('Demand by Weather')
-    axes[1].set_xlabel('Weather')
-    axes[1].set_ylabel('Demand')
+    # Demand stats
+    'geo_demand_std', 'geo_demand_max',
+    'geo_demand_min', 'geo_demand_range', 'geo_demand_mean',
+    'slot_demand_mean', 'slot_demand_std',
 
-    plt.tight_layout()
+    # Lag
+    'demand_lag1', 'demand_lag4', 'demand_lag8',
+    'demand_roll4', 'demand_roll8', 'lag1_vs_mean',
+]
+
+X      = train[FEATURES]
+y      = train['demand']
+X_test = test[FEATURES]
+
+print(f"\n  Total features : {len(FEATURES)}")
+print(f"  Train          : {X.shape}")
+print(f"  Test           : {X_test.shape}")
+print(f"  Missing train  : {X.isnull().sum().sum()}")
+print(f"  Missing test   : {X_test.isnull().sum().sum()}")
+
+# ── Day-based split (honest CV matching leaderboard) ──────────────────
