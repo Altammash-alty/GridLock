@@ -12,9 +12,7 @@ import lightgbm as lgb
 from catboost import CatBoostRegressor
 import pygeohash as pgh
 
-# ══════════════════════════════════════════════════════════════════════
-# SECTION 4 — OPTUNA TUNING
-# ══════════════════════════════════════════════════════════════════════
+
 print("\n" + "="*60)
 print("  SECTION 4 — HYPERPARAMETER TUNING")
 print("="*60)
